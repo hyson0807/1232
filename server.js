@@ -17,7 +17,9 @@ const supabase = createClient(
 )
 
 
-
+app.get('/', (req, res) => {
+    res.json({ message: 'Server is running' });
+});
 
 app.post('/signup', async (req, res) => {
     try {
@@ -72,6 +74,7 @@ app.post('/signup', async (req, res) => {
 
 
 
-app.listen(5004, () => {
-    console.log('Listening on 5004');
+const PORT = process.env.PORT || 5004;
+app.listen(PORT, () => {
+    console.log(`Listening on ${PORT}`);
 })
