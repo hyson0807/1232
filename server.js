@@ -45,7 +45,8 @@ app.post('/signup', async (req, res) => {
 
         const {error: profilesError} = await supabase.from("profiles").insert({
             id: authData.user.id,
-            user_type: user_type
+            user_type: user_type,
+            email: email,
         })
 
         if(profilesError) {
