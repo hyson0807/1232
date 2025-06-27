@@ -191,7 +191,6 @@ app.post('/signin-phone', async (req, res) => {
                     user_type: user.user_type,
                     email: user.email,
                     name: user.name,
-                    created_at: user.created_at
                 }
             });
         }
@@ -210,7 +209,6 @@ app.post('/signin-phone', async (req, res) => {
                 phone_number: phoneNumber,
                 user_type: userType,
                 auth_method: 'phone',
-                created_at: new Date().toISOString()
             })
             .select()
             .single();
@@ -228,7 +226,6 @@ app.post('/signin-phone', async (req, res) => {
                 id: newUser.id,
                 phone_number: newUser.phone_number,
                 user_type: newUser.user_type,
-                created_at: newUser.created_at
             }
         });
 
@@ -242,73 +239,73 @@ app.post('/signin-phone', async (req, res) => {
 });
 
 // 전화번호로 회원가입 엔드포인트 (명시적 회원가입이 필요한 경우를 위해 유지)
-app.post('/signup-phone', async (req, res) => {
-    const { phoneNumber, userType } = req.body;
-
-    if (!phoneNumber || !userType) {
-        return res.status(400).json({
-            success: false,
-            message: '전화번호와 유저 타입이 필요합니다.'
-        });
-    }
-
-    try {
-        // 기존 사용자 확인
-        const { data: existingUsers, error: checkError } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('phone_number', phoneNumber);
-
-        if (checkError) {
-            console.error('User check error:', checkError);
-            throw checkError;
-        }
-
-        if (existingUsers && existingUsers.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: '이미 등록된 전화번호입니다.'
-            });
-        }
-
-        // UUID 생성
-        const userId = uuidv4();
-
-        // profiles 테이블에 사용자 정보 저장
-        const { data: newUser, error: profileError } = await supabase
-            .from('profiles')
-            .insert({
-                id: userId,
-                phone_number: phoneNumber,
-                user_type: userType,
-                auth_method: 'phone',
-                created_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-
-        if (profileError) {
-            console.error('Profile creation error:', profileError);
-            throw profileError;
-        }
-
-        res.json({
-            success: true,
-            user: {
-                id: newUser.id,
-                phone_number: newUser.phone_number,
-                user_type: newUser.user_type,
-                created_at: newUser.created_at
-            }
-        });
-    } catch (error) {
-        console.error('Phone signup error:', error);
-        res.status(500).json({
-            success: false,
-            message: '회원가입 처리 중 오류가 발생했습니다.'
-        });
-    }
-});
+// app.post('/signup-phone', async (req, res) => {
+//     const { phoneNumber, userType } = req.body;
+//
+//     if (!phoneNumber || !userType) {
+//         return res.status(400).json({
+//             success: false,
+//             message: '전화번호와 유저 타입이 필요합니다.'
+//         });
+//     }
+//
+//     try {
+//         // 기존 사용자 확인
+//         const { data: existingUsers, error: checkError } = await supabase
+//             .from('profiles')
+//             .select('id')
+//             .eq('phone_number', phoneNumber);
+//
+//         if (checkError) {
+//             console.error('User check error:', checkError);
+//             throw checkError;
+//         }
+//
+//         if (existingUsers && existingUsers.length > 0) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: '이미 등록된 전화번호입니다.'
+//             });
+//         }
+//
+//         // UUID 생성
+//         const userId = uuidv4();
+//
+//         // profiles 테이블에 사용자 정보 저장
+//         const { data: newUser, error: profileError } = await supabase
+//             .from('profiles')
+//             .insert({
+//                 id: userId,
+//                 phone_number: phoneNumber,
+//                 user_type: userType,
+//                 auth_method: 'phone',
+//                 created_at: new Date().toISOString()
+//             })
+//             .select()
+//             .single();
+//
+//         if (profileError) {
+//             console.error('Profile creation error:', profileError);
+//             throw profileError;
+//         }
+//
+//         res.json({
+//             success: true,
+//             user: {
+//                 id: newUser.id,
+//                 phone_number: newUser.phone_number,
+//                 user_type: newUser.user_type,
+//                 created_at: newUser.created_at
+//             }
+//         });
+//     } catch (error) {
+//         console.error('Phone signup error:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: '회원가입 처리 중 오류가 발생했습니다.'
+//         });
+//     }
+// });
 
 const PORT = process.env.PORT || 5004;
 app.listen(PORT, () => {
