@@ -159,6 +159,7 @@ app.post('/verify-code', async (req, res) => {
 // 전화번호로 로그인 엔드포인트 (자동 회원가입 포함)
 app.post('/signin-phone', async (req, res) => {
     const { phoneNumber, userType } = req.body;
+    console.log(phoneNumber, userType);
 
     if (!phoneNumber || !userType) {
         return res.status(400).json({
