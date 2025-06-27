@@ -169,19 +169,25 @@ app.post('/signin-phone', async (req, res) => {
 
     try {
         // profiles 테이블에서 전화번호로 사용자 조회
-        const { data: user, error } = await supabase
+        const { data: users, error } = await supabase
             .from('profiles')
             .select('*')
             .eq('phone_number', phoneNumber)
-            .eq('user_type', userType)
-            .single();
+            .eq('user_type', userType);
 
-        if (error || !user) {
+        if (error) {
+            console.error('Database query error:', error);
+            throw error;
+        }
+
+        if (!users || users.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: '등록되지 않은 사용자입니다.'
             });
         }
+
+        const user = users[0];
 
         // 로그인 성공
         res.json({
