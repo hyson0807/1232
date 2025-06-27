@@ -16,6 +16,9 @@ const supabase = createClient(
     process.env.KEY_2,
 )
 
+const twilio = require('twilio');
+const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
 
 app.get('/', (req, res) => {
     res.json({ message: 'Server is running' });
@@ -71,6 +74,57 @@ app.post('/signup', async (req, res) => {
             error: '서버오류(회원가입 실패)'
         })
     }
+});
+
+
+//---------------------------------phone verify---------------------------------------
+
+// 인증 코드 전송
+app.post('/send-verification', async (req, res) => {
+    const { phoneNumber } = req.body;
+
+    try {
+        const verification = await client.verify.v2
+            .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+            .verifications
+            .create({ to: `+82${phoneNumber}`, channel: 'sms' });
+
+        res.json({ success: true, status: verification.status });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+});
+
+// 인증 코드 확인
+app.post('/verify-code', async (req, res) => {
+    const { phoneNumber, code } = req.body;
+
+    try {
+        const verification = await client.verify.v2
+            .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+            .verificationChecks
+            .create({ to: `+82${phoneNumber}`, code });
+
+        res.json({ success: verification.status === 'approved' });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+});
+
+// 전화번호로 로그인
+app.post('/signin-phone', async (req, res) => {
+    const { phoneNumber, userType } = req.body;
+
+    // Supabase에서 전화번호로 사용자 조회
+    // 있으면 로그인, 없으면 에러
+});
+
+// 전화번호로 회원가입
+app.post('/signup-phone', async (req, res) => {
+    const { phoneNumber, userType } = req.body;
+
+    // Supabase에 새 사용자 생성
+    // 전화번호를 unique identifier로 사용
 });
 
 
