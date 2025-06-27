@@ -3,8 +3,7 @@ import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 import twilio from 'twilio';
 import dotenv from 'dotenv';
-import pkg from 'uuid';
-const { v4: generateUUID } = pkg;
+import { v4 as uuidv4 } from 'uuid';
 dotenv.config();
 
 const app = express();
@@ -232,7 +231,7 @@ app.post('/signup-phone', async (req, res) => {
         }
 
         // UUID 생성
-        const userId = generateUUID();
+        const userId = uuidv4();
 
         // profiles 테이블에 사용자 정보 저장 (Auth 없이)
         const { data: newUser, error: profileError } = await supabase
