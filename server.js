@@ -191,6 +191,7 @@ app.post('/signin-phone', async (req, res) => {
                     user_type: user.user_type,
                     email: user.email,
                     name: user.name,
+                    created_at: user.created_at
                 }
             });
         }
@@ -198,34 +199,45 @@ app.post('/signin-phone', async (req, res) => {
         // 사용자가 없으면 자동 회원가입
         console.log('User not found, creating new user...');
 
-        // UUID 생성
-        const userId = uuidv4();
+        // 먼저 Supabase Auth에 사용자 생성
+        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+            phone: phoneNumber,
+            phone_confirm: true,
+        });
 
-        // profiles 테이블에 새 사용자 생성
+        if (authError) {
+            console.error('Auth user creation error:', authError);
+            throw new Error('사용자 생성에 실패했습니다');
+        }
+
+        // Auth 사용자 생성 성공 시 profiles 테이블에 저장
         const { data: newUser, error: createError } = await supabase
             .from('profiles')
             .insert({
-                id: userId,
+                id: authData.user.id,
                 phone_number: phoneNumber,
                 user_type: userType,
-                auth_method: 'phone',
+                auth_method: 'phone'
             })
             .select()
             .single();
 
         if (createError) {
-            console.error('User creation error:', createError);
+            console.error('Profile creation error:', createError);
+            // 프로필 생성 실패 시 Auth 사용자 삭제
+            await supabase.auth.admin.deleteUser(authData.user.id);
             throw createError;
         }
 
         // 회원가입 후 로그인 성공
         res.json({
             success: true,
-            isNewUser: true, // 새로운 사용자임을 표시
+            isNewUser: true,
             user: {
                 id: newUser.id,
                 phone_number: newUser.phone_number,
                 user_type: newUser.user_type,
+                created_at: newUser.created_at
             }
         });
 
@@ -239,73 +251,72 @@ app.post('/signin-phone', async (req, res) => {
 });
 
 // 전화번호로 회원가입 엔드포인트 (명시적 회원가입이 필요한 경우를 위해 유지)
-// app.post('/signup-phone', async (req, res) => {
-//     const { phoneNumber, userType } = req.body;
-//
-//     if (!phoneNumber || !userType) {
-//         return res.status(400).json({
-//             success: false,
-//             message: '전화번호와 유저 타입이 필요합니다.'
-//         });
-//     }
-//
-//     try {
-//         // 기존 사용자 확인
-//         const { data: existingUsers, error: checkError } = await supabase
-//             .from('profiles')
-//             .select('id')
-//             .eq('phone_number', phoneNumber);
-//
-//         if (checkError) {
-//             console.error('User check error:', checkError);
-//             throw checkError;
-//         }
-//
-//         if (existingUsers && existingUsers.length > 0) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: '이미 등록된 전화번호입니다.'
-//             });
-//         }
-//
-//         // UUID 생성
-//         const userId = uuidv4();
-//
-//         // profiles 테이블에 사용자 정보 저장
-//         const { data: newUser, error: profileError } = await supabase
-//             .from('profiles')
-//             .insert({
-//                 id: userId,
-//                 phone_number: phoneNumber,
-//                 user_type: userType,
-//                 auth_method: 'phone',
-//                 created_at: new Date().toISOString()
-//             })
-//             .select()
-//             .single();
-//
-//         if (profileError) {
-//             console.error('Profile creation error:', profileError);
-//             throw profileError;
-//         }
-//
-//         res.json({
-//             success: true,
-//             user: {
-//                 id: newUser.id,
-//                 phone_number: newUser.phone_number,
-//                 user_type: newUser.user_type,
-//                 created_at: newUser.created_at
-//             }
-//         });
-//     } catch (error) {
-//         console.error('Phone signup error:', error);
-//         res.status(500).json({
-//             success: false,
-//             message: '회원가입 처리 중 오류가 발생했습니다.'
-//         });
-//     }
-// });
+app.post('/signup-phone', async (req, res) => {
+    const { phoneNumber, userType } = req.body;
+
+    if (!phoneNumber || !userType) {
+        return res.status(400).json({
+            success: false,
+            message: '전화번호와 유저 타입이 필요합니다.'
+        });
+    }
+
+    try {
+        // 기존 사용자 확인
+        const { data: existingUsers, error: checkError } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('phone_number', phoneNumber);
+
+        if (checkError) {
+            console.error('User check error:', checkError);
+            throw checkError;
+        }
+
+        if (existingUsers && existingUsers.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: '이미 등록된 전화번호입니다.'
+            });
+        }
+
+        // UUID 생성
+        const userId = uuidv4();
+
+        // profiles 테이블에 사용자 정보 저장
+        const { data: newUser, error: profileError } = await supabase
+            .from('profiles')
+            .insert({
+                id: userId,
+                phone_number: phoneNumber,
+                user_type: userType,
+                auth_method: 'phone'
+            })
+            .select()
+            .single();
+
+        if (profileError) {
+            console.error('Profile creation error:', profileError);
+            throw profileError;
+        }
+
+        res.json({
+            success: true,
+            user: {
+                id: newUser.id,
+                phone_number: newUser.phone_number,
+                user_type: newUser.user_type,
+                created_at: newUser.created_at
+            }
+        });
+    } catch (error) {
+        console.error('Phone signup error:', error);
+        res.status(500).json({
+            success: false,
+            message: '회원가입 처리 중 오류가 발생했습니다.'
+        });
+    }
+});
 
 const PORT = process.env.PORT || 5004;
 app.listen(PORT, () => {
