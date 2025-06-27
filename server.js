@@ -201,7 +201,7 @@ app.post('/signin-phone', async (req, res) => {
 
         // 먼저 Supabase Auth에 사용자 생성
         const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-            phone: phoneNumber,
+            phone: formatPhoneNumber(phoneNumber), // E.164 형식으로 변환
             phone_confirm: true,
         });
 
@@ -280,8 +280,19 @@ app.post('/signup-phone', async (req, res) => {
             });
         }
 
-        // UUID 생성
-        const userId = uuidv4();
+        // 먼저 Supabase Auth에 사용자 생성
+        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+            phone: formatPhoneNumber(phoneNumber),  // E.164 형식으로 변환
+            phone_confirm: true,
+        });
+
+        if (authError) {
+            console.error('Auth user creation error:', authError);
+            throw new Error('사용자 생성에 실패했습니다');
+        }
+
+        // UUID 대신 Auth 사용자 ID 사용
+        const userId = authData.user.id;
 
         // profiles 테이블에 사용자 정보 저장
         const { data: newUser, error: profileError } = await supabase
