@@ -3,6 +3,8 @@ import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 import twilio from 'twilio';
 import dotenv from 'dotenv';
+import pkg from 'uuid';
+const { v4: generateUUID } = pkg;
 dotenv.config();
 
 const app = express();
@@ -229,24 +231,14 @@ app.post('/signup-phone', async (req, res) => {
             });
         }
 
-        // Supabase Auth에 익명 사용자 생성 (전화번호 인증용)
-        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-            phone: phoneNumber,
-            phone_confirm: true,
-        });
+        // UUID 생성
+        const userId = generateUUID();
 
-        if (authError) {
-            return res.status(400).json({
-                success: false,
-                message: 'Auth 사용자 생성 실패'
-            });
-        }
-
-        // profiles 테이블에 사용자 정보 저장
+        // profiles 테이블에 사용자 정보 저장 (Auth 없이)
         const { data: newUser, error: profileError } = await supabase
             .from('profiles')
             .insert({
-                id: authData.user.id,
+                id: userId,
                 phone_number: phoneNumber,
                 user_type: userType,
                 auth_method: 'phone',
@@ -256,8 +248,7 @@ app.post('/signup-phone', async (req, res) => {
             .single();
 
         if (profileError) {
-            // 프로필 생성 실패 시 Auth 사용자 삭제
-            await supabase.auth.admin.deleteUser(authData.user.id);
+            console.error('Profile creation error:', profileError);
             throw profileError;
         }
 
