@@ -156,7 +156,7 @@ app.post('/verify-code', async (req, res) => {
     }
 });
 
-// 전화번호로 로그인 엔드포인트
+// 전화번호로 로그인 엔드포인트 (자동 회원가입 포함)
 app.post('/signin-phone', async (req, res) => {
     const { phoneNumber, userType } = req.body;
 
@@ -180,27 +180,58 @@ app.post('/signin-phone', async (req, res) => {
             throw error;
         }
 
-        if (!users || users.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: '등록되지 않은 사용자입니다.'
+        // 기존 사용자가 있으면 로그인
+        if (users && users.length > 0) {
+            const user = users[0];
+            return res.json({
+                success: true,
+                user: {
+                    id: user.id,
+                    phone_number: user.phone_number,
+                    user_type: user.user_type,
+                    email: user.email,
+                    name: user.name,
+                    created_at: user.created_at
+                }
             });
         }
 
-        const user = users[0];
+        // 사용자가 없으면 자동 회원가입
+        console.log('User not found, creating new user...');
 
-        // 로그인 성공
+        // UUID 생성
+        const userId = uuidv4();
+
+        // profiles 테이블에 새 사용자 생성
+        const { data: newUser, error: createError } = await supabase
+            .from('profiles')
+            .insert({
+                id: userId,
+                phone_number: phoneNumber,
+                user_type: userType,
+                auth_method: 'phone',
+                created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (createError) {
+            console.error('User creation error:', createError);
+            throw createError;
+        }
+
+        // 회원가입 후 로그인 성공
         res.json({
             success: true,
+            isNewUser: true, // 새로운 사용자임을 표시
             user: {
-                id: user.id,
-                phone_number: user.phone_number,
-                user_type: user.user_type,
-                email: user.email,
-                name: user.name,
-                created_at: user.created_at
+                id: newUser.id,
+                phone_number: newUser.phone_number,
+                user_type: newUser.user_type,
+                created_at: newUser.created_at
             }
         });
+
     } catch (error) {
         console.error('Phone signin error:', error);
         res.status(500).json({
@@ -210,7 +241,7 @@ app.post('/signin-phone', async (req, res) => {
     }
 });
 
-// 전화번호로 회원가입 엔드포인트
+// 전화번호로 회원가입 엔드포인트 (명시적 회원가입이 필요한 경우를 위해 유지)
 app.post('/signup-phone', async (req, res) => {
     const { phoneNumber, userType } = req.body;
 
@@ -223,13 +254,17 @@ app.post('/signup-phone', async (req, res) => {
 
     try {
         // 기존 사용자 확인
-        const { data: existingUser } = await supabase
+        const { data: existingUsers, error: checkError } = await supabase
             .from('profiles')
             .select('id')
-            .eq('phone_number', phoneNumber)
-            .single();
+            .eq('phone_number', phoneNumber);
 
-        if (existingUser) {
+        if (checkError) {
+            console.error('User check error:', checkError);
+            throw checkError;
+        }
+
+        if (existingUsers && existingUsers.length > 0) {
             return res.status(400).json({
                 success: false,
                 message: '이미 등록된 전화번호입니다.'
@@ -239,7 +274,7 @@ app.post('/signup-phone', async (req, res) => {
         // UUID 생성
         const userId = uuidv4();
 
-        // profiles 테이블에 사용자 정보 저장 (Auth 없이)
+        // profiles 테이블에 사용자 정보 저장
         const { data: newUser, error: profileError } = await supabase
             .from('profiles')
             .insert({
