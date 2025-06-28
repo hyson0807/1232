@@ -1,9 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
-import twilio from 'twilio';
 import dotenv from 'dotenv';
-import { v4 as uuidv4 } from 'uuid';
+import {SolapiMessageService} from "solapi";
 dotenv.config();
 
 const app = express();
@@ -12,25 +11,12 @@ app.use(cors());
 app.use(express.json());
 
 // Supabase 클라이언트
-const supabase = createClient(
-    process.env.KEY_1,
-    process.env.KEY_2,
-)
+const supabase = createClient(process.env.KEY_1, process.env.KEY_2,)
 
-// Twilio 클라이언트
-const twilioClient = twilio(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-);
+const messageService = new SolapiMessageService(process.env.SOLAPI_API_KEY, process.env.SOLAPI_API_SECRET);
 
-// 전화번호 포맷팅 함수
-const formatPhoneNumber = (phoneNumber) => {
-    // 0으로 시작하는 한국 번호를 국제 형식으로 변환
-    if (phoneNumber.startsWith('0')) {
-        return `+82${phoneNumber.substring(1)}`;
-    }
-    return phoneNumber;
-};
+
+
 
 app.get('/', (req, res) => {
     res.json({ message: 'Server is running' });
@@ -89,246 +75,128 @@ app.post('/signup', async (req, res) => {
     }
 });
 
-// Twilio 인증 코드 전송 엔드포인트
-app.post('/send-verification', async (req, res) => {
-    const { phoneNumber } = req.body;
-
-    if (!phoneNumber) {
-        return res.status(400).json({
-            success: false,
-            message: '전화번호가 필요합니다.'
-        });
-    }
-
+// 회사에 메시지 전송 엔드포인트
+app.post('/send-message-to-company', async (req, res) => {
     try {
-        const verification = await twilioClient.verify.v2
-            .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-            .verifications
-            .create({
-                to: formatPhoneNumber(phoneNumber),
-                channel: 'sms',
-                locale: 'ko' // 한국어 메시지
-            });
+        const { user_id, company_number } = req.body;
 
-        res.json({
-            success: true,
-            status: verification.status
-        });
-    } catch (error) {
-        console.error('Twilio verification error:', error);
-        res.status(400).json({
-            success: false,
-            message: '인증 코드 전송에 실패했습니다.'
-        });
-    }
-});
-
-// 인증 코드 확인 엔드포인트
-app.post('/verify-code', async (req, res) => {
-    const { phoneNumber, code } = req.body;
-
-    if (!phoneNumber || !code) {
-        return res.status(400).json({
-            success: false,
-            message: '전화번호와 인증 코드가 필요합니다.'
-        });
-    }
-
-    try {
-        const verificationCheck = await twilioClient.verify.v2
-            .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-            .verificationChecks
-            .create({
-                to: formatPhoneNumber(phoneNumber),
-                code: code
-            });
-
-        res.json({
-            success: verificationCheck.status === 'approved',
-            status: verificationCheck.status
-        });
-    } catch (error) {
-        console.error('Twilio verification check error:', error);
-        res.status(400).json({
-            success: false,
-            message: '인증 코드가 올바르지 않습니다.'
-        });
-    }
-});
-
-// 전화번호로 로그인 엔드포인트 (자동 회원가입 포함)
-app.post('/signin-phone', async (req, res) => {
-    const { phoneNumber, userType } = req.body;
-    console.log(phoneNumber, userType);
-
-    if (!phoneNumber || !userType) {
-        return res.status(400).json({
-            success: false,
-            message: '전화번호와 유저 타입이 필요합니다.'
-        });
-    }
-
-    try {
-        // profiles 테이블에서 전화번호로 사용자 조회
-        const { data: users, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('phone_number', phoneNumber)
-            .eq('user_type', userType);
-
-        if (error) {
-            console.error('Database query error:', error);
-            throw error;
-        }
-
-        // 기존 사용자가 있으면 로그인
-        if (users && users.length > 0) {
-            const user = users[0];
-            return res.json({
-                success: true,
-                user: {
-                    id: user.id,
-                    phone_number: user.phone_number,
-                    user_type: user.user_type,
-                    email: user.email,
-                    name: user.name,
-                    created_at: user.created_at
-                }
-            });
-        }
-
-        // 사용자가 없으면 자동 회원가입
-        console.log('User not found, creating new user...');
-
-        // 먼저 Supabase Auth에 사용자 생성
-        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-            phone: formatPhoneNumber(phoneNumber), // E.164 형식으로 변환
-            phone_confirm: true,
-        });
-
-        if (authError) {
-            console.error('Auth user creation error:', authError);
-            throw new Error('사용자 생성에 실패했습니다');
-        }
-
-        // Auth 사용자 생성 성공 시 profiles 테이블에 저장
-        const { data: newUser, error: createError } = await supabase
-            .from('profiles')
-            .insert({
-                id: authData.user.id,
-                phone_number: phoneNumber,
-                user_type: userType,
-                auth_method: 'phone'
-            })
-            .select()
-            .single();
-
-        if (createError) {
-            console.error('Profile creation error:', createError);
-            // 프로필 생성 실패 시 Auth 사용자 삭제
-            await supabase.auth.admin.deleteUser(authData.user.id);
-            throw createError;
-        }
-
-        // 회원가입 후 로그인 성공
-        res.json({
-            success: true,
-            isNewUser: true,
-            user: {
-                id: newUser.id,
-                phone_number: newUser.phone_number,
-                user_type: newUser.user_type,
-                created_at: newUser.created_at
-            }
-        });
-
-    } catch (error) {
-        console.error('Phone signin error:', error);
-        res.status(500).json({
-            success: false,
-            message: '로그인 처리 중 오류가 발생했습니다.'
-        });
-    }
-});
-
-// 전화번호로 회원가입 엔드포인트 (명시적 회원가입이 필요한 경우를 위해 유지)
-app.post('/signup-phone', async (req, res) => {
-    const { phoneNumber, userType } = req.body;
-
-    if (!phoneNumber || !userType) {
-        return res.status(400).json({
-            success: false,
-            message: '전화번호와 유저 타입이 필요합니다.'
-        });
-    }
-
-    try {
-        // 기존 사용자 확인
-        const { data: existingUsers, error: checkError } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('phone_number', phoneNumber);
-
-        if (checkError) {
-            console.error('User check error:', checkError);
-            throw checkError;
-        }
-
-        if (existingUsers && existingUsers.length > 0) {
+        // 입력 검증
+        if (!user_id || !company_number) {
             return res.status(400).json({
                 success: false,
-                message: '이미 등록된 전화번호입니다.'
+                error: '필수 정보가 누락되었습니다.'
             });
         }
 
-        // 먼저 Supabase Auth에 사용자 생성
-        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-            phone: formatPhoneNumber(phoneNumber),  // E.164 형식으로 변환
-            phone_confirm: true,
-        });
-
-        if (authError) {
-            console.error('Auth user creation error:', authError);
-            throw new Error('사용자 생성에 실패했습니다');
-        }
-
-        // UUID 대신 Auth 사용자 ID 사용
-        const userId = authData.user.id;
-
-        // profiles 테이블에 사용자 정보 저장
-        const { data: newUser, error: profileError } = await supabase
+        // 1. 유저 프로필 정보 가져오기
+        const { data: userProfile, error: profileError } = await supabase
             .from('profiles')
-            .insert({
-                id: userId,
-                phone_number: phoneNumber,
-                user_type: userType,
-                auth_method: 'phone'
-            })
-            .select()
+            .select('*')
+            .eq('id', user_id)
             .single();
 
-        if (profileError) {
-            console.error('Profile creation error:', profileError);
-            throw profileError;
+        if (profileError || !userProfile) {
+            return res.status(404).json({
+                success: false,
+                error: '유저 정보를 찾을 수 없습니다.'
+            });
         }
 
-        res.json({
-            success: true,
-            user: {
-                id: newUser.id,
-                phone_number: newUser.phone_number,
-                user_type: newUser.user_type,
-                created_at: newUser.created_at
-            }
-        });
+        // 2. 유저가 선택한 키워드 가져오기
+        const { data: userKeywords, error: keywordError } = await supabase
+            .from('user_keyword')
+            .select('keyword_id')
+            .eq('user_id', user_id);
+
+        if (keywordError) {
+            return res.status(500).json({
+                success: false,
+                error: '키워드 정보를 가져오는데 실패했습니다.'
+            });
+        }
+
+        // 3. 키워드 정보 가져오기 (keyword 테이블에서)
+        const keywordIds = userKeywords.map(uk => uk.keyword_id);
+        const { data: keywords, error: keywordDetailError } = await supabase
+            .from('keyword')
+            .select('keyword, category')
+            .in('id', keywordIds);
+
+        if (keywordDetailError) {
+            console.error('키워드 상세 정보 조회 오류:', keywordDetailError);
+        }
+
+        // 4. 메시지 내용 구성
+        const keywordList = keywords && keywords.length > 0
+            ? keywords.map(k => `${k.keyword}(${k.category})`).join(', ')
+            : userKeywords.map(k => keywordMap[k.keyword_id] || `키워드${k.keyword_id}`).join(', ');
+
+        const messageText =
+            `[잡매칭 지원 알림]
+
+새로운 지원자가 있습니다!
+
+▶ 지원자 정보
+• 이름: ${userProfile.name || '미입력'}
+• 연락처: ${userProfile.phone_number || '미입력'}
+• 이메일: ${userProfile.email || '미입력'}
+• 비자: ${userProfile.visa || '미입력'}
+• 거주지: ${userProfile.address || '미입력'}
+• 한국어 수준: ${userProfile.korean_level || '미입력'}
+
+▶ 관심 분야
+${keywordList}
+
+▶ 자기소개
+${userProfile.description || '자기소개가 없습니다.'}
+
+지원자와 연락을 원하시면 위 연락처로 연락 부탁드립니다.`;
+
+        // 5. 메시지 전송
+        const message = {
+            text: messageText,
+            to: company_number.data.phone_number, // 프론트엔드에서 전달받은 회사 번호
+            from: process.env.SENDER_PHONE || '01036602129' // 발신 번호 (환경변수로 관리)
+        };
+
+        try {
+            const result = await messageService.sendMany([message]);
+            console.log('메시지 전송 성공:', result);
+
+            // 6. 지원 기록 저장 (선택사항 - 추후 지원 내역 관리를 위해)
+            // const { error: applicationError } = await supabase
+            //   .from('applications')
+            //   .insert({
+            //     user_id: user_id,
+            //     company_id: company_id,
+            //     applied_at: new Date(),
+            //     status: 'sent'
+            //   });
+
+            return res.json({
+                success: true,
+                message: '메시지가 성공적으로 전송되었습니다.',
+                messageId: result.groupId
+            });
+
+        } catch (msgError) {
+            console.error('메시지 전송 실패:', msgError);
+            return res.status(500).json({
+                success: false,
+                error: '메시지 전송에 실패했습니다.'
+            });
+        }
+
     } catch (error) {
-        console.error('Phone signup error:', error);
-        res.status(500).json({
+        console.error('서버 오류:', error);
+        return res.status(500).json({
             success: false,
-            message: '회원가입 처리 중 오류가 발생했습니다.'
+            error: '서버 오류가 발생했습니다.'
         });
     }
 });
+
+
 
 const PORT = process.env.PORT || 5004;
 app.listen(PORT, () => {
