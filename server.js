@@ -134,8 +134,7 @@ app.post('/send-message-to-company', async (req, res) => {
             ? keywords.map(k => `${k.keyword}(${k.category})`).join(', ')
             : userKeywords.map(k => keywordMap[k.keyword_id] || `키워드${k.keyword_id}`).join(', ');
 
-        const messageText =
-            `[잡매칭 지원 알림]
+        const messageText = `[잡매칭 지원 알림]
 
 새로운 지원자가 있습니다!
 
@@ -157,13 +156,20 @@ ${userProfile.description || '자기소개가 없습니다.'}
 
         // 5. 메시지 전송
         const message = {
+            // 문자 내용
             text: messageText,
-            to: company_number, // 프론트엔드에서 전달받은 회사 번호
-            from: process.env.SENDER_PHONE || '01036602129' // 발신 번호 (환경변수로 관리)
+            // 수신번호 (문자 받는 이)
+            to: company_number,
+            // 발신번호 (문자 보내는 이)
+            from: process.env.SENDER_PHONE || '01036602129'
         };
 
+        // 메시지 목록 그룹에 담기 (배열)
+        const messageGroup = [message];
+
         try {
-            const result = await messageService.sendMany([message]);
+            // 메시지 그룹 발송 요청
+            const result = await messageService.sendMany(messageGroup);
             console.log('메시지 전송 성공:', result);
 
             // 6. 지원 기록 저장 (선택사항 - 추후 지원 내역 관리를 위해)
