@@ -14,12 +14,10 @@ app.use(express.json());
 const { SolapiMessageService } = pkg;
 
 // Supabase 클라이언트
-const supabase = createClient(process.env.KEY_1, process.env.KEY_2,)
+const supabase = createClient(process.env.KEY_1, process.env.KEY_2);
 
+// Solapi 메시지 서비스 초기화
 const messageService = new SolapiMessageService(process.env.SOLAPI_API_KEY, process.env.SOLAPI_API_SECRET);
-
-
-
 
 app.get('/', (req, res) => {
     res.json({ message: 'Server is running' });
@@ -28,38 +26,38 @@ app.get('/', (req, res) => {
 // 기존 이메일 회원가입 엔드포인트
 app.post('/signup', async (req, res) => {
     try {
-        const { email, password, user_type } = req.body
+        const { email, password, user_type } = req.body;
 
         if(!email || !password || !user_type) {
             return res.status(400).json({
                 error: '필수정보누락(email||password||user_type)'
-            })
+            });
         }
 
         const {error: authError, data: authData} = await supabase.auth.admin.createUser({
             email,
             password,
             email_confirm: true,
-        })
+        });
 
         if(authError) {
             return res.status(400).json({
                 error: authError.message
-            })
-        } else console.log("Auth signup successful")
+            });
+        } else console.log("Auth signup successful");
 
         const {error: profilesError} = await supabase.from("profiles").insert({
             id: authData.user.id,
             user_type: user_type,
             email: email,
             auth_method: 'email' // 인증 방식 추가
-        })
+        });
 
         if(profilesError) {
-            await supabase.auth.admin.deleteUser(authData.user.id)
+            await supabase.auth.admin.deleteUser(authData.user.id);
             return res.status(500).json({
                 error: '프로필 생성 실패'
-            })
+            });
         }
 
         return res.status(201).json({
@@ -68,13 +66,13 @@ app.post('/signup', async (req, res) => {
                 auth_id: authData.user.id,
                 user_type: user_type
             }
-        })
+        });
 
     } catch (error) {
-        console.error('Signup error:', error)
+        console.error('Signup error:', error);
         return res.status(500).json({
             error: '서버오류(회원가입 실패)'
-        })
+        });
     }
 });
 
@@ -99,6 +97,7 @@ app.post('/send-message-to-company', async (req, res) => {
             .single();
 
         if (profileError || !userProfile) {
+            console.error('유저 정보 조회 오류:', profileError);
             return res.status(404).json({
                 success: false,
                 error: '유저 정보를 찾을 수 없습니다.'
@@ -112,6 +111,7 @@ app.post('/send-message-to-company', async (req, res) => {
             .eq('user_id', user_id);
 
         if (keywordError) {
+            console.error('키워드 조회 오류:', keywordError);
             return res.status(500).json({
                 success: false,
                 error: '키워드 정보를 가져오는데 실패했습니다.'
@@ -119,21 +119,29 @@ app.post('/send-message-to-company', async (req, res) => {
         }
 
         // 3. 키워드 정보 가져오기 (keyword 테이블에서)
-        const keywordIds = userKeywords.map(uk => uk.keyword_id);
-        const { data: keywords, error: keywordDetailError } = await supabase
-            .from('keyword')
-            .select('keyword, category')
-            .in('id', keywordIds);
+        let keywordList = '미등록';
 
-        if (keywordDetailError) {
-            console.error('키워드 상세 정보 조회 오류:', keywordDetailError);
+        if (userKeywords && userKeywords.length > 0) {
+            const keywordIds = userKeywords.map(uk => uk.keyword_id);
+            const { data: keywords, error: keywordDetailError } = await supabase
+                .from('keyword')
+                .select('keyword, category')
+                .in('id', keywordIds);
+
+            if (keywordDetailError) {
+                console.error('키워드 상세 정보 조회 오류:', keywordDetailError);
+                return res.status(500).json({
+                    success: false,
+                    error: '키워드 상세 정보를 가져오는데 실패했습니다.'
+                });
+            }
+
+            if (keywords && keywords.length > 0) {
+                keywordList = keywords.map(k => `${k.keyword}(${k.category})`).join(', ');
+            }
         }
 
         // 4. 메시지 내용 구성
-        const keywordList = keywords && keywords.length > 0
-            ? keywords.map(k => `${k.keyword}(${k.category})`).join(', ')
-            : userKeywords.map(k => keywordMap[k.keyword_id] || `키워드${k.keyword_id}`).join(', ');
-
         const messageText = `[잡매칭 지원 알림]
 
 새로운 지원자가 있습니다!
@@ -192,7 +200,8 @@ ${userProfile.description || '자기소개가 없습니다.'}
             console.error('메시지 전송 실패:', msgError);
             return res.status(500).json({
                 success: false,
-                error: '메시지 전송에 실패했습니다.'
+                error: '메시지 전송에 실패했습니다.',
+                details: msgError.message
             });
         }
 
@@ -205,9 +214,12 @@ ${userProfile.description || '자기소개가 없습니다.'}
     }
 });
 
-
+// 헬스 체크 엔드포인트
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date() });
+});
 
 const PORT = process.env.PORT || 5004;
 app.listen(PORT, () => {
     console.log(`Listening on ${PORT}`);
-})
+});
