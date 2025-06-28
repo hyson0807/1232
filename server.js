@@ -45,7 +45,6 @@ app.post('/signup', async (req, res) => {
             id: authData.user.id,
             user_type: user_type,
             email: email,
-            auth_method: 'email' // 인증 방식 추가
         });
 
         if(profilesError) {
