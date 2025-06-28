@@ -206,6 +206,140 @@ ${userProfile.description || '자기소개가 없습니다.'}
     }
 });
 
+// 구직자에게 메시지 전송 엔드포인트
+app.post('/send-message-to-user', async (req, res) => {
+    try {
+        const { company_id, user_number } = req.body;
+
+        // 입력 검증
+        if (!company_id || !user_number) {
+            return res.status(400).json({
+                success: false,
+                error: '필수 정보가 누락되었습니다.'
+            });
+        }
+
+        // 1. 회사 프로필 정보 가져오기
+        const { data: companyProfile, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', company_id)
+            .single();
+
+        if (profileError || !companyProfile) {
+            console.error('회사 정보 조회 오류:', profileError);
+            return res.status(404).json({
+                success: false,
+                error: '회사 정보를 찾을 수 없습니다.'
+            });
+        }
+
+        // 2. 회사가 선택한 키워드 가져오기
+        const { data: companyKeywords, error: keywordError } = await supabase
+            .from('company_keyword')
+            .select('keyword_id')
+            .eq('company_id', company_id);
+
+        if (keywordError) {
+            console.error('키워드 조회 오류:', keywordError);
+            return res.status(500).json({
+                success: false,
+                error: '키워드 정보를 가져오는데 실패했습니다.'
+            });
+        }
+
+        // 3. 키워드 정보 가져오기 (keyword 테이블에서)
+        let keywordList = '미등록';
+
+        if (companyKeywords && companyKeywords.length > 0) {
+            const keywordIds = companyKeywords.map(ck => ck.keyword_id);
+            const { data: keywords, error: keywordDetailError } = await supabase
+                .from('keyword')
+                .select('keyword, category')
+                .in('id', keywordIds);
+
+            if (keywordDetailError) {
+                console.error('키워드 상세 정보 조회 오류:', keywordDetailError);
+                return res.status(500).json({
+                    success: false,
+                    error: '키워드 상세 정보를 가져오는데 실패했습니다.'
+                });
+            }
+
+            if (keywords && keywords.length > 0) {
+                keywordList = keywords.map(k => `${k.keyword}(${k.category})`).join(', ');
+            }
+        }
+
+        // 4. 메시지 내용 구성
+        const messageText = `[잡매칭 관심 기업 알림]
+
+귀하의 프로필에 관심있는 기업이 있습니다!
+
+▶ 기업 정보
+• 회사명: ${companyProfile.name || '미입력'}
+• 연락처: ${companyProfile.phone_number || '미입력'}
+• 이메일: ${companyProfile.email || '미입력'}
+• 웹사이트: ${companyProfile.website || '미입력'}
+• 주소: ${companyProfile.address || '미입력'}
+
+▶ 채용 분야
+${keywordList}
+
+▶ 회사 소개
+${companyProfile.description || '회사 소개가 없습니다.'}
+
+관심이 있으시면 위 연락처로 연락 부탁드립니다.`;
+
+        // 5. 메시지 전송
+        const message = {
+            to: user_number,
+            from: process.env.SENDER_PHONE || '01036602129',
+            text: messageText,
+        };
+
+        // 메시지 목록 그룹에 담기 (배열)
+        const messageGroup = [message];
+
+        try {
+            // 메시지 그룹 발송 요청
+            const result = await messageService.send(messageGroup);
+            console.log('메시지 전송 성공:', result);
+
+            // 6. 연락 기록 저장 (선택사항 - 추후 연락 내역 관리를 위해)
+            // const { error: contactError } = await supabase
+            //   .from('company_contacts')
+            //   .insert({
+            //     company_id: company_id,
+            //     user_phone: user_number,
+            //     contacted_at: new Date(),
+            //     status: 'sent'
+            //   });
+
+            return res.json({
+                success: true,
+                message: '메시지가 성공적으로 전송되었습니다.',
+                messageId: result.groupId
+            });
+
+        } catch (msgError) {
+            console.error('메시지 전송 실패:', msgError);
+            return res.status(500).json({
+                success: false,
+                error: '메시지 전송에 실패했습니다.',
+                details: msgError.message
+            });
+        }
+
+    } catch (error) {
+        console.error('서버 오류:', error);
+        return res.status(500).json({
+            success: false,
+            error: '서버 오류가 발생했습니다.'
+        });
+    }
+});
+
 // 헬스 체크 엔드포인트
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date() });
