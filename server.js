@@ -2,13 +2,16 @@ import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-import {SolapiMessageService} from "solapi";
+import pkg from 'solapi';
+
 dotenv.config();
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+const { SolapiMessageService } = pkg;
 
 // Supabase 클라이언트
 const supabase = createClient(process.env.KEY_1, process.env.KEY_2,)
@@ -155,7 +158,7 @@ ${userProfile.description || '자기소개가 없습니다.'}
         // 5. 메시지 전송
         const message = {
             text: messageText,
-            to: company_number.data.phone_number, // 프론트엔드에서 전달받은 회사 번호
+            to: company_number, // 프론트엔드에서 전달받은 회사 번호
             from: process.env.SENDER_PHONE || '01036602129' // 발신 번호 (환경변수로 관리)
         };
 
