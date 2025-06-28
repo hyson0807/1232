@@ -10,7 +10,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module",
   "description": "",
   "dependencies": {
     "@supabase/auth-ui-react": "^0.4.7",

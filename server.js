@@ -1,22 +1,17 @@
-import express from 'express';
-import cors from 'cors';
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import pkg from 'solapi';
+const express = require('express');
+const cors = require('cors');
+const { createClient } = require('@supabase/supabase-js');
+const dotenv = require('dotenv');
 
 dotenv.config();
-
 const app = express();
-
 app.use(cors());
 app.use(express.json());
-
-const { SolapiMessageService } = pkg;
 
 // Supabase 클라이언트
 const supabase = createClient(process.env.KEY_1, process.env.KEY_2);
 
-// Solapi 메시지 서비스 초기화
+const { SolapiMessageService } = require('solapi');
 const messageService = new SolapiMessageService(process.env.SOLAPI_API_KEY, process.env.SOLAPI_API_SECRET);
 
 app.get('/', (req, res) => {
@@ -164,12 +159,9 @@ ${userProfile.description || '자기소개가 없습니다.'}
 
         // 5. 메시지 전송
         const message = {
-            // 문자 내용
-            text: messageText,
-            // 수신번호 (문자 받는 이)
             to: company_number,
-            // 발신번호 (문자 보내는 이)
-            from: process.env.SENDER_PHONE || '01036602129'
+            from: process.env.SENDER_PHONE || '01036602129',
+            text: messageText,
         };
 
         // 메시지 목록 그룹에 담기 (배열)
@@ -177,7 +169,7 @@ ${userProfile.description || '자기소개가 없습니다.'}
 
         try {
             // 메시지 그룹 발송 요청
-            const result = await messageService.sendMany(messageGroup);
+            const result = await messageService.send(messageGroup);
             console.log('메시지 전송 성공:', result);
 
             // 6. 지원 기록 저장 (선택사항 - 추후 지원 내역 관리를 위해)
