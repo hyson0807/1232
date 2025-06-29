@@ -484,6 +484,180 @@ ${allKeywords.map(k => `- ${k.keyword} (${k.category})`).join('\n')}
 
 
 
+app.post('/extract-jobseeker-keywords', async (req, res) => {
+    try {
+        const { user_id, self_description } = req.body;
+
+        if (!user_id || !self_description) {
+            return res.status(400).json({
+                success: false,
+                error: '필수 정보가 누락되었습니다.'
+            });
+        }
+
+        // 1. 데이터베이스에서 모든 키워드 가져오기
+        const { data: allKeywords, error: keywordError } = await supabase
+            .from('keyword')
+            .select('*');
+
+        if (keywordError) {
+            console.error('키워드 조회 오류:', keywordError);
+            return res.status(500).json({
+                success: false,
+                error: '키워드 정보를 가져오는데 실패했습니다.'
+            });
+        }
+
+        // 2. 키워드 매칭을 위한 간단한 알고리즘
+        const extractedKeywordIds = [];
+        const descriptionLower = self_description.toLowerCase();
+
+        // 키워드 매칭 규칙
+        const keywordRules = {
+            // 직무 관련
+            '주방': ['요리', '조리', '주방', '쿠킹', '음식', '식당', 'kitchen', 'cook', 'chef'],
+            '서빙': ['서빙', '홀', '서비스', '접객', '손님', 'serving', 'waiter', 'waitress'],
+            '청소': ['청소', '정리', '위생', '깨끗', 'cleaning', 'clean'],
+            '공장': ['공장', '제조', '생산', '작업', '라인', 'factory', 'manufacturing'],
+            '건설': ['건설', '건축', '공사', '시공', 'construction', 'building'],
+            '농업': ['농업', '농장', '농사', '재배', 'farming', 'agriculture'],
+            '물류': ['물류', '배송', '택배', '운송', '창고', 'logistics', 'delivery'],
+            '판매': ['판매', '영업', '매장', '마트', '편의점', 'sales', 'retail'],
+
+            // 지역 관련
+            '서울': ['서울', 'seoul'],
+            '경기': ['경기', '수원', '안양', '부천', '안산', 'gyeonggi'],
+            '인천': ['인천', 'incheon'],
+            '부산': ['부산', 'busan'],
+            '대구': ['대구', 'daegu'],
+            '광주': ['광주', 'gwangju'],
+            '대전': ['대전', 'daejeon'],
+
+            // 혜택 관련
+            '기숙사': ['기숙사', '숙소', '숙박', '주거', '거주', 'dormitory', 'accommodation'],
+            '식사제공': ['식사', '밥', '급식', '음식제공', 'meal', 'food'],
+            '교통비': ['교통', '통근', '차비', 'transportation', 'commute'],
+            '보너스': ['보너스', '상여', '인센티브', 'bonus', 'incentive'],
+            '4대보험': ['보험', '4대보험', '사대보험', 'insurance'],
+            '주5일': ['주5일', '주 5일', '평일', 'weekday', '5 days'],
+            '주말휴무': ['주말', '휴무', '토일', 'weekend', 'holiday'],
+            '야간근무': ['야간', '밤', '저녁', '새벽', 'night', 'evening'],
+
+            // 경험/스킬 관련
+            '경력무관': ['초보', '신입', '무관', '경험없', 'beginner', 'no experience'],
+            '경력우대': ['경력', '경험', '숙련', 'experience', 'skilled'],
+            '한국어가능': ['한국어', '한국말', 'korean'],
+            '영어가능': ['영어', 'english'],
+            '컴퓨터활용': ['컴퓨터', '엑셀', 'computer', 'excel'],
+            '운전가능': ['운전', '면허', 'driving', 'license']
+        };
+
+        // 키워드 매칭
+        allKeywords.forEach(keyword => {
+            const rules = keywordRules[keyword.keyword];
+            if (rules) {
+                const hasMatch = rules.some(rule => descriptionLower.includes(rule));
+                if (hasMatch) {
+                    extractedKeywordIds.push(keyword.id);
+                }
+            }
+        });
+
+        // 카테고리별 최소 선택 보장
+        const categories = ['직무', '지역', '혜택'];
+        const selectedByCategory = {};
+
+        allKeywords.forEach(keyword => {
+            if (!selectedByCategory[keyword.category]) {
+                selectedByCategory[keyword.category] = [];
+            }
+            if (extractedKeywordIds.includes(keyword.id)) {
+                selectedByCategory[keyword.category].push(keyword);
+            }
+        });
+
+        // 각 카테고리에서 최소 1개는 선택되도록
+        categories.forEach(category => {
+            if (!selectedByCategory[category] || selectedByCategory[category].length === 0) {
+                // 해당 카테고리에서 가장 일반적인 키워드 추가
+                const categoryKeywords = allKeywords.filter(k => k.category === category);
+                if (categoryKeywords.length > 0) {
+                    // 기본 키워드 추가 (예: 직무-경력무관, 지역-서울, 혜택-4대보험)
+                    const defaultKeywords = {
+                        '직무': '경력무관',
+                        '지역': '서울',
+                        '혜택': '4대보험'
+                    };
+
+                    const defaultKeyword = categoryKeywords.find(k =>
+                        k.keyword === defaultKeywords[category]
+                    );
+
+                    if (defaultKeyword && !extractedKeywordIds.includes(defaultKeyword.id)) {
+                        extractedKeywordIds.push(defaultKeyword.id);
+                    }
+                }
+            }
+        });
+
+        // 3. 기존 user_keyword 삭제
+        const { error: deleteError } = await supabase
+            .from('user_keyword')
+            .delete()
+            .eq('user_id', user_id);
+
+        if (deleteError) {
+            console.error('기존 키워드 삭제 오류:', deleteError);
+            return res.status(500).json({
+                success: false,
+                error: '기존 키워드 삭제에 실패했습니다.'
+            });
+        }
+
+        // 4. 새로운 키워드 삽입
+        if (extractedKeywordIds.length > 0) {
+            const userKeywords = extractedKeywordIds.map(keywordId => ({
+                user_id: user_id,
+                keyword_id: keywordId,
+                priority: 2 // 기본값
+            }));
+
+            const { error: insertError } = await supabase
+                .from('user_keyword')
+                .insert(userKeywords);
+
+            if (insertError) {
+                console.error('키워드 삽입 오류:', insertError);
+                return res.status(500).json({
+                    success: false,
+                    error: '키워드 저장에 실패했습니다.'
+                });
+            }
+        }
+
+        // 5. 선택된 키워드 정보 반환
+        const selectedKeywords = allKeywords.filter(k =>
+            extractedKeywordIds.includes(k.id)
+        );
+
+        return res.json({
+            success: true,
+            message: '키워드가 성공적으로 추출되었습니다.',
+            keywords: selectedKeywords,
+            keywordIds: extractedKeywordIds
+        });
+
+    } catch (error) {
+        console.error('서버 오류:', error);
+        return res.status(500).json({
+            success: false,
+            error: '서버 오류가 발생했습니다.'
+        });
+    }
+});
+
+
+
 // 헬스 체크 엔드포인트
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date() });
