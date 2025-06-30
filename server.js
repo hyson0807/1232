@@ -635,14 +635,25 @@ app.post('/extract-jobseeker-keywords', async (req, res) => {
             }
         }
 
-        // 5. 선택된 키워드 정보 반환
+        // 5. profiles 테이블에 자기소개 업데이트
+        const { error: profileUpdateError } = await supabase
+            .from('profiles')
+            .update({ description: self_description })
+            .eq('id', user_id);
+
+        if (profileUpdateError) {
+            console.error('프로필 업데이트 오류:', profileUpdateError);
+            // 에러가 있어도 키워드는 저장되었으므로 계속 진행
+        }
+
+        // 6. 선택된 키워드 정보 반환
         const selectedKeywords = allKeywords.filter(k =>
             extractedKeywordIds.includes(k.id)
         );
 
         return res.json({
             success: true,
-            message: '키워드가 성공적으로 추출되었습니다.',
+            message: '키워드와 자기소개가 성공적으로 저장되었습니다.',
             keywords: selectedKeywords,
             keywordIds: extractedKeywordIds
         });
