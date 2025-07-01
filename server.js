@@ -549,7 +549,14 @@ app.post('/extract-jobseeker-keywords', async (req, res) => {
             '한국어가능': ['한국어', '한국말', 'korean'],
             '영어가능': ['영어', 'english'],
             '컴퓨터활용': ['컴퓨터', '엑셀', 'computer', 'excel'],
-            '운전가능': ['운전', '면허', 'driving', 'license']
+            '운전가능': ['운전', '면허', 'driving', 'license'],
+
+            '단기': ['단기', '1개월', '2개월', '3개월', '일시', '임시', 'short', 'temporary', 'temp'],
+            '중기': ['중기', '6개월', '반년', '4개월', '5개월', 'medium'],
+            '장기': ['장기', '1년', '정규직', '오래', '계속', 'long', 'permanent', 'full-time'],
+            '일용직': ['일당', '일용', '하루', '일일', 'daily', 'day'],
+            '계약직': ['계약', '기간', '프로젝트', 'contract', 'project'],
+            '정규직': ['정규', '정직원', '무기', 'permanent', 'regular']
         };
 
         // 키워드 매칭
@@ -564,7 +571,7 @@ app.post('/extract-jobseeker-keywords', async (req, res) => {
         });
 
         // 카테고리별 최소 선택 보장
-        const categories = ['직무', '지역', '혜택'];
+        const categories = ['직무', '지역', '혜택', '근무기간'];
         const selectedByCategory = {};
 
         allKeywords.forEach(keyword => {
@@ -586,7 +593,8 @@ app.post('/extract-jobseeker-keywords', async (req, res) => {
                     const defaultKeywords = {
                         '직무': '경력무관',
                         '지역': '서울',
-                        '혜택': '4대보험'
+                        '혜택': '4대보험',
+                        '근무기간': '장기'
                     };
 
                     const defaultKeyword = categoryKeywords.find(k =>
