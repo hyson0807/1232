@@ -13,7 +13,11 @@ app.use(express.json());
 const supabase = createClient(process.env.KEY_1, process.env.KEY_2);
 
 const { SolapiMessageService } = require('solapi');
+const res = require("express/lib/response");
 const messageService = new SolapiMessageService(process.env.SOLAPI_API_KEY, process.env.SOLAPI_API_SECRET);
+const otpStore = new Map();
+const jwt = require('jsonwebtoken');
+
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -22,6 +26,113 @@ const openai = new OpenAI({
 app.get('/', (req, res) => {
     res.json({ message: 'Server is running' });
 });
+
+
+function generateOTP() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+app.post('/send-otp', async (req, res) => {
+    try {
+        const { phone } = req.body;
+        const otp = generateOTP();
+        otpStore.set(phone, { otp, expires: Date.now() + 300000 });
+        console.log('생성된 OTP:', otp);
+
+        const result = await messageService.send({
+            'to': phone,
+            'from': process.env.SENDER_PHONE,
+            'text': `verification: ${otp}`
+        })
+        console.log('SMS 발송 성공:', result);
+        res.json({ success: true});
+
+    }  catch (error) {
+        console.error('OTP 발송 실패:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+})
+
+app.post('/verify-otp', async (req, res) => {
+    try{
+        const {phone, otp, userType} = req.body;
+        console.log('OTP 검증:', phone, otp);
+
+        const stored = otpStore.get(phone); //OTP 확인
+        if(!stored) {
+            return res.status(400).json({
+                success: false,
+                error: 'OTP를 찾을 수 없습니다'
+            });
+        }
+        if(Date.now() > stored.expires) {
+            otpStore.delete(phone);
+            return res.status(400).json({
+                success: false,
+                error: 'OTP가 만료되었습니다'
+            });
+        }
+        if(stored.otp !== otp) {
+            return res.status(400).json({
+                success: false,
+                error: '잘못된 인증번호입니다'
+            });
+        }
+        otpStore.delete(phone);
+
+        // otp 문제없을 경우, JWT토큰 생성 시작
+        const token = jwt.sign({
+            userId: `user_${Date.now()}`,
+            phone,
+            userType
+        },
+            process.env.JWT_SECRET || 'test-secret',
+            {expiresIn: '7d'}
+        );
+
+        res.json({
+            success: true,
+            token,
+            user: {
+                userId: `user_${Date.now()}`,
+                phone,
+                userType
+            }
+        });
+    }catch(error){
+        console.error('OTP 검증 실패:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // 기존 이메일 회원가입 엔드포인트
 app.post('/signup', async (req, res) => {
