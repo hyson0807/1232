@@ -101,6 +101,7 @@ app.post('/verify-otp', async (req, res) => {
 
         let token;
         let userData;
+        let onboardingStatus;
 
         // 에러가 있지만 단순히 유저가 없는 경우가 아닌 경우 처리
         if (fetchError && fetchError.code !== 'PGRST116') {
@@ -122,6 +123,11 @@ app.post('/verify-otp', async (req, res) => {
                 phone: phone,
                 userType: existingUser.user_type,
                 isNewUser: false
+            };
+
+            // 온보딩 상태는 profiles 테이블에서 바로 확인
+            onboardingStatus = {
+                completed: existingUser.onboarding_completed || false
             };
 
         } else {
@@ -146,13 +152,14 @@ app.post('/verify-otp', async (req, res) => {
                 throw authError;
             }
 
-            // profiles 테이블에 추가 정보 저장
+            // profiles 테이블에 추가 정보 저장 (onboarding_completed는 기본값 false)
             const { error: profileError } = await supabase
                 .from('profiles')
                 .insert({
                     id: authData.user.id,
                     phone_number: phone,
                     user_type: userType,
+                    onboarding_completed: false  // 명시적으로 false 설정
                 });
 
             if (profileError) {
@@ -174,15 +181,22 @@ app.post('/verify-otp', async (req, res) => {
                 userType: userType,
                 isNewUser: true
             };
+
+            // 신규 유저는 무조건 온보딩 미완료
+            onboardingStatus = {
+                completed: false
+            };
         }
 
         // 성공 응답
         console.log('인증 성공:', userData.userId);
+        console.log('온보딩 완료 여부:', onboardingStatus.completed);
 
         res.json({
             success: true,
             token: token,
             user: userData,
+            onboardingStatus: onboardingStatus,
             message: userData.isNewUser ? '회원가입이 완료되었습니다' : '로그인되었습니다'
         });
 
