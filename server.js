@@ -27,6 +27,8 @@ app.get('/', (req, res) => {
     res.json({ message: 'Server is running' });
 });
 
+const secret = process.env.JWT_SECRET;
+
 
 function generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
@@ -57,57 +59,148 @@ app.post('/send-otp', async (req, res) => {
 })
 
 app.post('/verify-otp', async (req, res) => {
-    try{
-        const {phone, otp, userType} = req.body;
+    try {
+        const { phone, otp, userType } = req.body;
         console.log('OTP 검증:', phone, otp);
 
-        const stored = otpStore.get(phone); //OTP 확인
-        if(!stored) {
+        // OTP 확인
+        const stored = otpStore.get(phone);
+        if (!stored) {
             return res.status(400).json({
                 success: false,
                 error: 'OTP를 찾을 수 없습니다'
             });
         }
-        if(Date.now() > stored.expires) {
+
+        // 만료 시간 확인
+        if (Date.now() > stored.expires) {
             otpStore.delete(phone);
             return res.status(400).json({
                 success: false,
                 error: 'OTP가 만료되었습니다'
             });
         }
-        if(stored.otp !== otp) {
+
+        // OTP 일치 확인
+        if (stored.otp !== otp) {
             return res.status(400).json({
                 success: false,
                 error: '잘못된 인증번호입니다'
             });
         }
+
+        // OTP 삭제 (한 번만 사용 가능)
         otpStore.delete(phone);
 
-        // otp 문제없을 경우, JWT토큰 생성 시작
-        const token = jwt.sign({
-            userId: `user_${Date.now()}`,
-            phone,
-            userType
-        },
-            process.env.JWT_SECRET || 'test-secret',
-            {expiresIn: '7d'}
-        );
+        // 기존 유저 확인
+        const { data: existingUser, error: fetchError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('phone_number', phone)
+            .single();
+
+        let token;
+        let userData;
+
+        // 에러가 있지만 단순히 유저가 없는 경우가 아닌 경우 처리
+        if (fetchError && fetchError.code !== 'PGRST116') {
+            throw fetchError;
+        }
+
+        if (existingUser) {
+            // 기존 유저 - 로그인 처리
+            console.log('기존 유저 로그인:', existingUser.id);
+
+            token = jwt.sign({
+                userId: existingUser.id,
+                phone: phone,
+                userType: existingUser.user_type
+            }, process.env.JWT_SECRET || 'test-secret', { expiresIn: '7d' });
+
+            userData = {
+                userId: existingUser.id,
+                phone: phone,
+                userType: existingUser.user_type,
+                isNewUser: false
+            };
+
+        } else {
+            // 신규 유저 - 회원가입 처리
+            console.log('신규 유저 회원가입');
+
+            // userType이 제공되지 않은 경우 체크
+            if (!userType) {
+                return res.status(400).json({
+                    success: false,
+                    error: '신규 가입 시 userType이 필요합니다'
+                });
+            }
+
+            // Supabase Auth에 유저 생성
+            const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+                phone: phone,
+                phone_confirm: true
+            });
+
+            if (authError) {
+                throw authError;
+            }
+
+            // profiles 테이블에 추가 정보 저장
+            const { error: profileError } = await supabase
+                .from('profiles')
+                .insert({
+                    id: authData.user.id,
+                    phone_number: phone,
+                    user_type: userType,
+                });
+
+            if (profileError) {
+                // 프로필 생성 실패 시 auth 유저도 삭제 (롤백)
+                await supabase.auth.admin.deleteUser(authData.user.id);
+                throw profileError;
+            }
+
+            // JWT 토큰 생성
+            token = jwt.sign({
+                userId: authData.user.id,
+                phone: phone,
+                userType: userType
+            }, process.env.JWT_SECRET || 'test-secret', { expiresIn: '7d' });
+
+            userData = {
+                userId: authData.user.id,
+                phone: phone,
+                userType: userType,
+                isNewUser: true
+            };
+        }
+
+        // 성공 응답
+        console.log('인증 성공:', userData.userId);
 
         res.json({
             success: true,
-            token,
-            user: {
-                userId: `user_${Date.now()}`,
-                phone,
-                userType
-            }
+            token: token,
+            user: userData,
+            message: userData.isNewUser ? '회원가입이 완료되었습니다' : '로그인되었습니다'
         });
-    }catch(error){
+
+    } catch (error) {
         console.error('OTP 검증 실패:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+
+        // 에러 타입에 따른 응답
+        if (error.message?.includes('duplicate key')) {
+            res.status(400).json({
+                success: false,
+                error: '이미 등록된 전화번호입니다'
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: '인증 처리 중 오류가 발생했습니다'
+            });
+        }
     }
 });
 
