@@ -63,7 +63,105 @@ app.post('/verify-otp', async (req, res) => {
         const { phone, otp, userType } = req.body;
         console.log('OTP 검증:', phone, otp);
 
-        // OTP 확인
+        // 개발 모드 테스트 계정 (OTP: 123456)
+        const isDevelopment = process.env.NODE_ENV !== 'production';
+        const isTestOTP = otp === '123456';
+        const testAccounts = {
+            '+821011111111': { name: '테스트 구직자', type: 'user' },
+            '+821022222222': { name: '테스트 회사', type: 'company' }
+        };
+
+        if (isDevelopment && isTestOTP && testAccounts[phone]) {
+            // 테스트 계정 처리
+            console.log('테스트 계정 로그인:', phone);
+
+            // 기존 유저 확인
+            const { data: existingUser, error: fetchError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('phone_number', phone)
+                .single();
+
+            if (fetchError && fetchError.code !== 'PGRST116') {
+                throw fetchError;
+            }
+
+            let token;
+            let userData;
+            let onboardingStatus;
+
+            if (existingUser) {
+                // 기존 테스트 유저 로그인
+                token = jwt.sign({
+                    userId: existingUser.id,
+                    phone: phone,
+                    userType: existingUser.user_type
+                }, process.env.JWT_SECRET || 'test-secret', { expiresIn: '7d' });
+
+                userData = {
+                    userId: existingUser.id,
+                    phone: phone,
+                    userType: existingUser.user_type,
+                    isNewUser: false
+                };
+
+                onboardingStatus = {
+                    completed: existingUser.onboarding_completed || false
+                };
+            } else {
+                // 신규 테스트 유저 생성
+                const testInfo = testAccounts[phone];
+
+                const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+                    phone: phone,
+                    phone_confirm: true
+                });
+
+                if (authError) throw authError;
+
+                const { error: profileError } = await supabase
+                    .from('profiles')
+                    .insert({
+                        id: authData.user.id,
+                        phone_number: phone,
+                        user_type: testInfo.type,
+                        name: testInfo.name,
+                        onboarding_completed: false
+                    });
+
+                if (profileError) {
+                    await supabase.auth.admin.deleteUser(authData.user.id);
+                    throw profileError;
+                }
+
+                token = jwt.sign({
+                    userId: authData.user.id,
+                    phone: phone,
+                    userType: testInfo.type
+                }, process.env.JWT_SECRET || 'test-secret', { expiresIn: '7d' });
+
+                userData = {
+                    userId: authData.user.id,
+                    phone: phone,
+                    userType: testInfo.type,
+                    isNewUser: true
+                };
+
+                onboardingStatus = {
+                    completed: false
+                };
+            }
+
+            return res.json({
+                success: true,
+                token: token,
+                user: userData,
+                onboardingStatus: onboardingStatus,
+                message: '테스트 계정으로 로그인되었습니다'
+            });
+        }
+
+        // 일반 OTP 확인
         const stored = otpStore.get(phone);
         if (!stored) {
             return res.status(400).json({
