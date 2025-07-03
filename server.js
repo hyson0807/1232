@@ -993,6 +993,185 @@ app.post('/extract-jobseeker-keywords', async (req, res) => {
 
 
 
+// AI 이력서 생성 엔드포인트
+app.post('/generate-resume', async (req, res) => {
+    try {
+        const { user_id, company_id } = req.body;
+
+        if (!user_id || !company_id) {
+            return res.status(400).json({
+                success: false,
+                error: '필수 정보가 누락되었습니다.'
+            });
+        }
+
+        // 1. 유저 프로필 정보 가져오기
+        const { data: userProfile, error: userError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user_id)
+            .single();
+
+        if (userError || !userProfile) {
+            return res.status(404).json({
+                success: false,
+                error: '유저 정보를 찾을 수 없습니다.'
+            });
+        }
+
+        // 2. user_info 테이블에서 추가 정보 가져오기
+        const { data: userInfo, error: userInfoError } = await supabase
+            .from('user_info')
+            .select('*')
+            .eq('user_id', user_id)
+            .single();
+
+        // user_info가 없어도 계속 진행 (선택적 정보)
+        if (userInfoError) {
+            console.log('user_info 조회 실패 또는 데이터 없음:', userInfoError);
+        }
+
+        // 3. 유저 키워드 정보 가져오기
+        const { data: userKeywords, error: keywordError } = await supabase
+            .from('user_keyword')
+            .select(`
+                keyword:keyword_id (
+                    keyword,
+                    category
+                )
+            `)
+            .eq('user_id', user_id);
+
+        if (keywordError) {
+            console.error('키워드 조회 오류:', keywordError);
+        }
+
+        // 4. 회사 정보 가져오기
+        const { data: companyProfile, error: companyError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', company_id)
+            .single();
+
+        if (companyError || !companyProfile) {
+            return res.status(404).json({
+                success: false,
+                error: '회사 정보를 찾을 수 없습니다.'
+            });
+        }
+
+        // 5. 회사 키워드 정보 가져오기
+        const { data: companyKeywords, error: companyKeywordError } = await supabase
+            .from('company_keyword')
+            .select(`
+                keyword:keyword_id (
+                    keyword,
+                    category
+                )
+            `)
+            .eq('company_id', company_id);
+
+        // 6. 키워드 정리
+        const userJobKeywords = userKeywords?.filter(k => k.keyword.category === '직종').map(k => k.keyword.keyword) || [];
+        const userConditionKeywords = userKeywords?.filter(k => k.keyword.category === '근무조건').map(k => k.keyword.keyword) || [];
+        const companyJobKeywords = companyKeywords?.filter(k => k.keyword.category === '직종').map(k => k.keyword.keyword) || [];
+        const companyConditionKeywords = companyKeywords?.filter(k => k.keyword.category === '근무조건').map(k => k.keyword.keyword) || [];
+
+        // 7. AI 프롬프트 생성
+        const prompt = `
+다음 정보를 바탕으로 외국인 구직자가 한국 회사에 보내는 자기소개서를 작성해주세요.
+
+[지원자 정보]
+- 이름: ${userProfile.name || '지원자'}
+- 나이: ${userInfo?.age || userProfile.age || '미입력'}
+- 성별: ${userInfo?.gender || userProfile.gender || '미입력'}
+- 국적: ${userInfo?.nationality || userKeywords?.find(k => k.keyword.category === '국가')?.keyword.keyword || '미입력'}
+- 비자: ${userInfo?.visa || userProfile.visa || '미입력'}
+- 비자 만료일: ${userInfo?.visa_expiry_date || '미입력'}
+- 한국어 수준: ${userInfo?.korean_level || userProfile.korean_level || '미입력'}
+- 경력: ${userInfo?.experience || userProfile.experience || '미입력'}
+- 한국 거주 기간: ${userInfo?.how_long || userProfile.how_long || '미입력'}
+- 학력: ${userInfo?.education || '미입력'}
+- 운전면허: ${userInfo?.has_license ? '있음' : '없음'}
+- 차량 소유: ${userInfo?.has_car ? '있음' : '없음'}
+- 자기소개: ${userProfile.description || ''}
+- 희망 직종: ${userJobKeywords.join(', ') || '미입력'}
+- 희망 근무조건: ${userConditionKeywords.join(', ') || '미입력'}
+
+[회사 정보]
+- 회사명: ${companyProfile.name}
+- 주소: ${companyProfile.address || '미입력'}
+- 회사 소개: ${companyProfile.description || ''}
+- 채용 직종: ${companyJobKeywords.join(', ') || '미입력'}
+- 제공 조건: ${companyConditionKeywords.join(', ') || '미입력'}
+
+[매칭 분석]
+- 회사가 ${companyJobKeywords.join(', ')} 직종을 채용하고 있습니다.
+- 지원자는 ${userJobKeywords.join(', ')} 직종을 희망합니다.
+- 회사 업종과 지원자 경력의 연관성을 찾아 강조하세요.
+
+작성 가이드라인:
+1. 친근하고 정중한 어투로 작성하세요.
+2. "안녕하세요, [회사명] 사장님"으로 시작하세요.
+3. 지원자의 강점을 구체적으로 어필하세요.
+4. 경력이나 특기가 회사의 채용 직종과 연관되면 강조하세요.
+5. 회사가 제공하는 조건과 지원자가 원하는 조건이 맞으면 언급하세요.
+6. 300-400자 정도로 작성하세요.
+7. 문단을 적절히 나누어 읽기 쉽게 작성하세요.
+8. 진정성 있고 열정적인 태도를 보여주세요.
+
+예시 형식:
+안녕하세요, [회사명] 사장님.
+
+저는 [나이]살 [국적] 출신으로, 한국에서 일할 준비가 되어있는 [이름]입니다. 
+현재 [비자] 비자를 보유하고 있으며, [희망근무기간]을 희망합니다.
+
+[경력 및 강점 소개 - 회사 업종과 연관지어서]
+
+[개인의 성격적 강점이나 특기]
+
+[회사에 대한 관심과 일하고 싶은 이유]
+
+성실하고 책임감 있게 일하겠습니다. 면접 기회를 주시면 감사하겠습니다.
+`;
+
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4",
+            messages: [
+                {
+                    role: "system",
+                    content: "당신은 외국인 구직자를 돕는 전문 이력서 작성자입니다. 한국 회사 문화를 잘 이해하고 있으며, 진정성 있고 호감을 주는 자기소개서를 작성합니다. 회사의 니즈와 지원자의 강점을 잘 매칭시켜 작성합니다."
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ],
+            temperature: 0.7,
+            max_tokens: 1000
+        });
+
+        const resume = completion.choices[0].message.content;
+
+        return res.json({
+            success: true,
+            resume: resume,
+            userProfile: {
+                name: userProfile.name || userInfo?.name || '지원자',
+                phone: userProfile.phone_number
+            },
+            companyName: companyProfile.name
+        });
+
+    } catch (error) {
+        console.error('이력서 생성 오류:', error);
+        return res.status(500).json({
+            success: false,
+            error: '이력서 생성 중 오류가 발생했습니다.'
+        });
+    }
+});
+
 // 헬스 체크 엔드포인트
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date() });
