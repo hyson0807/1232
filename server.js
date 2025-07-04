@@ -266,6 +266,36 @@ app.post('/verify-otp', async (req, res) => {
                 throw profileError;
             }
 
+            if (userType === 'user') {
+                // user_info 테이블에 기본 정보 생성
+                const { error: userInfoError } = await supabase
+                    .from('user_info')
+                    .insert({
+                        user_id: authData.user.id,
+                        // 기본값들은 DB 스키마에 정의되어 있음
+                    });
+
+                if (userInfoError) {
+                    console.error('user_info 생성 실패:', userInfoError);
+                    // user_info 생성 실패해도 회원가입은 계속 진행
+                    // 나중에 프로필 업데이트 시 생성될 수 있음
+                }
+            } else if (userType === 'company') {
+                // company_info 테이블에 기본 정보 생성
+                const { error: companyInfoError } = await supabase
+                    .from('company_info')
+                    .insert({
+                        company_id: authData.user.id,
+                        // 기본값들은 DB 스키마에 정의되어 있음
+                    });
+
+                if (companyInfoError) {
+                    console.error('company_info 생성 실패:', companyInfoError);
+                    // company_info 생성 실패해도 회원가입은 계속 진행
+                    // 나중에 프로필 업데이트 시 생성될 수 있음
+                }
+            }
+
             // JWT 토큰 생성
             token = jwt.sign({
                 userId: authData.user.id,
